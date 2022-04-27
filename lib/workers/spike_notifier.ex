@@ -6,13 +6,16 @@ defmodule Plausible.Workers.SpikeNotifier do
   @at_most_every "12 hours"
 
   @impl Oban.Worker
-  def perform(_args, _job, clickhouse \\ Plausible.Stats.Clickhouse) do
+  def perform(_job, clickhouse \\ Plausible.Stats.Clickhouse) do
     notifications =
       Repo.all(
         from sn in SpikeNotification,
           where: is_nil(sn.last_sent),
           or_where: sn.last_sent < fragment("now() - INTERVAL ?", @at_most_every),
-          preload: :site
+          join: s in Plausible.Site,
+          on: sn.site_id == s.id,
+          where: not s.locked,
+          preload: [site: s]
       )
 
     for notification <- notifications do

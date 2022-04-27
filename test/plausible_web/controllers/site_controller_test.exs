@@ -9,7 +9,22 @@ defmodule PlausibleWeb.SiteControllerTest do
 
     test "shows the site form", %{conn: conn} do
       conn = get(conn, "/sites/new")
+
       assert html_response(conn, 200) =~ "Your website details"
+    end
+
+    test "shows onboarding steps if it's the first site for the user", %{conn: conn} do
+      conn = get(conn, "/sites/new")
+
+      assert html_response(conn, 200) =~ "Add site info"
+    end
+
+    test "does not show onboarding steps if user has a site already", %{conn: conn, user: user} do
+      insert(:site, members: [user], domain: "test-site.com")
+
+      conn = get(conn, "/sites/new")
+
+      refute html_response(conn, 200) =~ "Add site info"
     end
   end
 
@@ -28,6 +43,49 @@ defmodule PlausibleWeb.SiteControllerTest do
       assert html_response(conn, 200) =~ "test-site.com"
       assert html_response(conn, 200) =~ "<b>3</b> visitors in last 24h"
     end
+
+    test "shows invitations for user by email address", %{conn: conn, user: user} do
+      site = insert(:site)
+      insert(:invitation, email: user.email, site_id: site.id, inviter: build(:user))
+      conn = get(conn, "/sites")
+
+      assert html_response(conn, 200) =~ site.domain
+    end
+
+    test "invitations are case insensitive", %{conn: conn, user: user} do
+      site = insert(:site)
+
+      insert(:invitation,
+        email: String.upcase(user.email),
+        site_id: site.id,
+        inviter: build(:user)
+      )
+
+      conn = get(conn, "/sites")
+
+      assert html_response(conn, 200) =~ site.domain
+    end
+
+    test "paginates sites", %{conn: conn, user: user} do
+      insert(:site, members: [user], domain: "test-site1.com")
+      insert(:site, members: [user], domain: "test-site2.com")
+      insert(:site, members: [user], domain: "test-site3.com")
+      insert(:site, members: [user], domain: "test-site4.com")
+
+      conn = get(conn, "/sites?per_page=2")
+
+      assert html_response(conn, 200) =~ "test-site1.com"
+      assert html_response(conn, 200) =~ "test-site2.com"
+      refute html_response(conn, 200) =~ "test-site3.com"
+      refute html_response(conn, 200) =~ "test-site4.com"
+
+      conn = get(conn, "/sites?per_page=2&page=2")
+
+      refute html_response(conn, 200) =~ "test-site1.com"
+      refute html_response(conn, 200) =~ "test-site2.com"
+      assert html_response(conn, 200) =~ "test-site3.com"
+      assert html_response(conn, 200) =~ "test-site4.com"
+    end
   end
 
   describe "POST /sites" do
@@ -44,6 +102,19 @@ defmodule PlausibleWeb.SiteControllerTest do
 
       assert redirected_to(conn) == "/example.com/snippet"
       assert Repo.exists?(Plausible.Site, domain: "example.com")
+    end
+
+    test "starts trial if user does not have trial yet", %{conn: conn, user: user} do
+      Plausible.Auth.User.remove_trial_expiry(user) |> Repo.update!()
+
+      post(conn, "/sites", %{
+        "site" => %{
+          "domain" => "example.com",
+          "timezone" => "Europe/London"
+        }
+      })
+
+      assert Repo.reload!(user).trial_expiry_date
     end
 
     test "sends welcome email if this is the user's first site", %{conn: conn} do
@@ -71,6 +142,73 @@ defmodule PlausibleWeb.SiteControllerTest do
       })
 
       assert_no_emails_delivered()
+    end
+
+    test "does not allow site creation when the user is at their site limit", %{
+      conn: conn,
+      user: user
+    } do
+      # default site limit defined in config/.test.env
+      insert(:site, members: [user])
+      insert(:site, members: [user])
+      insert(:site, members: [user])
+
+      conn =
+        post(conn, "/sites", %{
+          "site" => %{
+            "domain" => "example.com",
+            "timezone" => "Europe/London"
+          }
+        })
+
+      assert conn.status == 400
+    end
+
+    test "allows accounts registered before 2021-05-05 to go over the limit", %{
+      conn: conn,
+      user: user
+    } do
+      Repo.update_all(from(u in "users", where: u.id == ^user.id),
+        set: [inserted_at: ~N[2020-01-01 00:00:00]]
+      )
+
+      insert(:site, members: [user])
+      insert(:site, members: [user])
+      insert(:site, members: [user])
+      insert(:site, members: [user])
+
+      conn =
+        post(conn, "/sites", %{
+          "site" => %{
+            "domain" => "example.com",
+            "timezone" => "Europe/London"
+          }
+        })
+
+      assert redirected_to(conn) == "/example.com/snippet"
+      assert Repo.exists?(Plausible.Site, domain: "example.com")
+    end
+
+    test "allows enterprise accounts to create unlimited sites", %{
+      conn: conn,
+      user: user
+    } do
+      insert(:enterprise_plan, user: user)
+
+      insert(:site, members: [user])
+      insert(:site, members: [user])
+      insert(:site, members: [user])
+
+      conn =
+        post(conn, "/sites", %{
+          "site" => %{
+            "domain" => "example.com",
+            "timezone" => "Europe/London"
+          }
+        })
+
+      assert redirected_to(conn) == "/example.com/snippet"
+      assert Repo.exists?(Plausible.Site, domain: "example.com")
     end
 
     test "cleans up the url", %{conn: conn} do
@@ -162,14 +300,16 @@ defmodule PlausibleWeb.SiteControllerTest do
     setup [:create_user, :log_in, :create_site]
 
     test "updates the timezone", %{conn: conn, site: site} do
-      put(conn, "/#{site.domain}/settings", %{
-        "site" => %{
-          "timezone" => "Europe/London"
-        }
-      })
+      conn =
+        put(conn, "/#{site.domain}/settings", %{
+          "site" => %{
+            "timezone" => "Europe/London"
+          }
+        })
 
       updated = Repo.get(Plausible.Site, site.id)
       assert updated.timezone == "Europe/London"
+      assert redirected_to(conn, 302) == "/#{site.domain}/settings/general"
     end
   end
 
@@ -177,10 +317,11 @@ defmodule PlausibleWeb.SiteControllerTest do
     setup [:create_user, :log_in, :create_site]
 
     test "makes the site public", %{conn: conn, site: site} do
-      post(conn, "/sites/#{site.domain}/make-public")
+      conn = post(conn, "/sites/#{site.domain}/make-public")
 
       updated = Repo.get(Plausible.Site, site.id)
       assert updated.public
+      assert redirected_to(conn, 302) == "/#{site.domain}/settings/visibility"
     end
   end
 
@@ -188,10 +329,11 @@ defmodule PlausibleWeb.SiteControllerTest do
     setup [:create_user, :log_in, :create_site]
 
     test "makes the site private", %{conn: conn, site: site} do
-      post(conn, "/sites/#{site.domain}/make-private")
+      conn = post(conn, "/sites/#{site.domain}/make-private")
 
       updated = Repo.get(Plausible.Site, site.id)
       refute updated.public
+      assert redirected_to(conn, 302) == "/#{site.domain}/settings/visibility"
     end
   end
 
@@ -216,12 +358,14 @@ defmodule PlausibleWeb.SiteControllerTest do
     test "updates google auth property", %{conn: conn, user: user, site: site} do
       insert(:google_auth, user: user, site: site)
 
-      put(conn, "/#{site.domain}/settings/google", %{
-        "google_auth" => %{"property" => "some-new-property.com"}
-      })
+      conn =
+        put(conn, "/#{site.domain}/settings/google", %{
+          "google_auth" => %{"property" => "some-new-property.com"}
+        })
 
       updated_auth = Repo.one(Plausible.Site.GoogleAuth)
       assert updated_auth.property == "some-new-property.com"
+      assert redirected_to(conn, 302) == "/#{site.domain}/settings/search-console"
     end
   end
 
@@ -230,9 +374,10 @@ defmodule PlausibleWeb.SiteControllerTest do
 
     test "deletes associated google auth", %{conn: conn, user: user, site: site} do
       insert(:google_auth, user: user, site: site)
-      delete(conn, "/#{site.domain}/settings/google")
+      conn = delete(conn, "/#{site.domain}/settings/google")
 
       refute Repo.exists?(Plausible.Site.GoogleAuth)
+      assert redirected_to(conn, 302) == "/#{site.domain}/settings/search-console"
     end
   end
 
@@ -250,31 +395,35 @@ defmodule PlausibleWeb.SiteControllerTest do
     setup [:create_user, :log_in, :create_site]
 
     test "creates a pageview goal for the website", %{conn: conn, site: site} do
-      post(conn, "/#{site.domain}/goals", %{
-        goal: %{
-          page_path: "/success",
-          event_name: ""
-        }
-      })
+      conn =
+        post(conn, "/#{site.domain}/goals", %{
+          goal: %{
+            page_path: "/success",
+            event_name: ""
+          }
+        })
 
       goal = Repo.one(Plausible.Goal)
 
       assert goal.page_path == "/success"
       assert goal.event_name == nil
+      assert redirected_to(conn, 302) == "/#{site.domain}/settings/goals"
     end
 
     test "creates a custom event goal for the website", %{conn: conn, site: site} do
-      post(conn, "/#{site.domain}/goals", %{
-        goal: %{
-          page_path: "",
-          event_name: "Signup"
-        }
-      })
+      conn =
+        post(conn, "/#{site.domain}/goals", %{
+          goal: %{
+            page_path: "",
+            event_name: "Signup"
+          }
+        })
 
       goal = Repo.one(Plausible.Goal)
 
       assert goal.event_name == "Signup"
       assert goal.page_path == nil
+      assert redirected_to(conn, 302) == "/#{site.domain}/settings/goals"
     end
   end
 
@@ -284,9 +433,10 @@ defmodule PlausibleWeb.SiteControllerTest do
     test "lists goals for the site", %{conn: conn, site: site} do
       goal = insert(:goal, domain: site.domain, event_name: "Custom event")
 
-      delete(conn, "/#{site.domain}/goals/#{goal.id}")
+      conn = delete(conn, "/#{site.domain}/goals/#{goal.id}")
 
       assert Repo.aggregate(Plausible.Goal, :count, :id) == 0
+      assert redirected_to(conn, 302) == "/#{site.domain}/settings/goals"
     end
   end
 

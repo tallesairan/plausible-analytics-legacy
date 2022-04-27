@@ -25,25 +25,28 @@ defmodule Plausible.Auth.User do
     has_many :api_keys, Plausible.Auth.ApiKey
     has_one :google_auth, Plausible.Site.GoogleAuth
     has_one :subscription, Plausible.Billing.Subscription
+    has_one :enterprise_plan, Plausible.Billing.EnterprisePlan
 
     timestamps()
   end
 
-  def new(user, attrs \\ %{}) do
-    user
+  def new(attrs \\ %{}) do
+    %Plausible.Auth.User{}
     |> cast(attrs, @required)
     |> validate_required(@required)
     |> validate_length(:password, min: 6, message: "has to be at least 6 characters")
+    |> validate_length(:password, max: 64, message: "cannot be longer than 64 characters")
     |> validate_confirmation(:password)
     |> hash_password()
-    |> change(trial_expiry_date: trial_expiry())
+    |> start_trial
+    |> set_email_verified
     |> unique_constraint(:email)
   end
 
   def changeset(user, attrs \\ %{}) do
     user
     |> cast(attrs, [:email, :name, :email_verified, :theme, :trial_expiry_date])
-    |> validate_required([:email, :name, :email_verified, :trial_expiry_date])
+    |> validate_required([:email, :name, :email_verified])
     |> unique_constraint(:email)
   end
 
@@ -64,11 +67,31 @@ defmodule Plausible.Auth.User do
 
   def hash_password(changeset), do: changeset
 
+  def remove_trial_expiry(user) do
+    change(user, trial_expiry_date: nil)
+  end
+
+  def start_trial(user) do
+    change(user, trial_expiry_date: trial_expiry())
+  end
+
+  def end_trial(user) do
+    change(user, trial_expiry_date: Timex.today() |> Timex.shift(days: -1))
+  end
+
   defp trial_expiry() do
     if Application.get_env(:plausible, :is_selfhost) do
       Timex.today() |> Timex.shift(years: 100)
     else
       Timex.today() |> Timex.shift(days: 30)
+    end
+  end
+
+  defp set_email_verified(user) do
+    if Keyword.fetch!(Application.get_env(:plausible, :selfhost), :enable_email_verification) do
+      change(user, email_verified: false)
+    else
+      change(user, email_verified: true)
     end
   end
 end

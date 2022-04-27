@@ -71,6 +71,8 @@ defmodule PlausibleWeb.Email do
   end
 
   def trial_upgrade_email(user, day, {pageviews, custom_events}) do
+    suggested_plan = Plausible.Billing.Plans.suggested_plan(user, pageviews + custom_events)
+
     base_email()
     |> to(user)
     |> tag("trial-upgrade-email")
@@ -79,7 +81,8 @@ defmodule PlausibleWeb.Email do
       user: user,
       day: day,
       custom_events: custom_events,
-      usage: pageviews + custom_events
+      usage: pageviews + custom_events,
+      suggested_plan: suggested_plan
     )
   end
 
@@ -112,15 +115,58 @@ defmodule PlausibleWeb.Email do
     })
   end
 
-  def over_limit_email(user, usage, last_cycle) do
+  def over_limit_email(user, usage, last_cycle, suggested_plan) do
     base_email()
     |> to(user)
     |> tag("over-limit")
-    |> subject("You have outgrown your Plausible subscription tier ")
+    |> subject("You have outgrown your Plausible subscription tier")
     |> render("over_limit.html", %{
       user: user,
       usage: usage,
-      last_cycle: last_cycle
+      last_cycle: last_cycle,
+      suggested_plan: suggested_plan
+    })
+  end
+
+  def enterprise_over_limit_email(user, usage, last_cycle, site_usage, site_allowance) do
+    base_email()
+    |> to("enterprise@plausible.io")
+    |> tag("enterprise-over-limit")
+    |> subject("#{user.email} has outgrown their enterprise plan")
+    |> render("enterprise_over_limit.html", %{
+      user: user,
+      usage: usage,
+      last_cycle: last_cycle,
+      site_usage: site_usage,
+      site_allowance: site_allowance
+    })
+  end
+
+  def yearly_renewal_notification(user) do
+    date = Timex.format!(user.subscription.next_bill_date, "{Mfull} {D}, {YYYY}")
+
+    base_email()
+    |> to(user)
+    |> tag("yearly-renewal")
+    |> subject("Your Plausible subscription is up for renewal")
+    |> render("yearly_renewal_notification.html", %{
+      user: user,
+      date: date,
+      next_bill_amount: user.subscription.next_bill_amount,
+      currency: user.subscription.currency_code
+    })
+  end
+
+  def yearly_expiration_notification(user) do
+    date = Timex.format!(user.subscription.next_bill_date, "{Mfull} {D}, {YYYY}")
+
+    base_email()
+    |> to(user)
+    |> tag("yearly-expiration")
+    |> subject("Your Plausible subscription is about to expire")
+    |> render("yearly_expiration_notification.html", %{
+      user: user,
+      date: date
     })
   end
 
@@ -130,6 +176,95 @@ defmodule PlausibleWeb.Email do
     |> tag("cancelled-email")
     |> subject("Your Plausible Analytics subscription has been canceled")
     |> render("cancellation_email.html", name: user.name)
+  end
+
+  def new_user_invitation(invitation) do
+    base_email()
+    |> to(invitation.email)
+    |> tag("new-user-invitation")
+    |> subject("[Plausible Analytics] You've been invited to #{invitation.site.domain}")
+    |> render("new_user_invitation.html",
+      invitation: invitation
+    )
+  end
+
+  def existing_user_invitation(invitation) do
+    base_email()
+    |> to(invitation.email)
+    |> tag("existing-user-invitation")
+    |> subject("[Plausible Analytics] You've been invited to #{invitation.site.domain}")
+    |> render("existing_user_invitation.html",
+      invitation: invitation
+    )
+  end
+
+  def ownership_transfer_request(invitation, new_owner_account) do
+    base_email()
+    |> to(invitation.email)
+    |> tag("ownership-transfer-request")
+    |> subject("[Plausible Analytics] Request to transfer ownership of #{invitation.site.domain}")
+    |> render("ownership_transfer_request.html",
+      invitation: invitation,
+      new_owner_account: new_owner_account
+    )
+  end
+
+  def invitation_accepted(invitation) do
+    base_email()
+    |> to(invitation.inviter.email)
+    |> tag("invitation-accepted")
+    |> subject(
+      "[Plausible Analytics] #{invitation.email} accepted your invitation to #{invitation.site.domain}"
+    )
+    |> render("invitation_accepted.html",
+      invitation: invitation
+    )
+  end
+
+  def invitation_rejected(invitation) do
+    base_email()
+    |> to(invitation.inviter.email)
+    |> tag("invitation-rejected")
+    |> subject(
+      "[Plausible Analytics] #{invitation.email} rejected your invitation to #{invitation.site.domain}"
+    )
+    |> render("invitation_rejected.html",
+      invitation: invitation
+    )
+  end
+
+  def ownership_transfer_accepted(invitation) do
+    base_email()
+    |> to(invitation.inviter.email)
+    |> tag("ownership-transfer-accepted")
+    |> subject(
+      "[Plausible Analytics] #{invitation.email} accepted the ownership transfer of #{invitation.site.domain}"
+    )
+    |> render("ownership_transfer_accepted.html",
+      invitation: invitation
+    )
+  end
+
+  def ownership_transfer_rejected(invitation) do
+    base_email()
+    |> to(invitation.inviter.email)
+    |> tag("ownership-transfer-rejected")
+    |> subject(
+      "[Plausible Analytics] #{invitation.email} rejected the ownership transfer of #{invitation.site.domain}"
+    )
+    |> render("ownership_transfer_rejected.html",
+      invitation: invitation
+    )
+  end
+
+  def site_member_removed(membership) do
+    base_email()
+    |> to(membership.user.email)
+    |> tag("site-member-removed")
+    |> subject("[Plausible Analytics] Your access to #{membership.site.domain} has been revoked")
+    |> render("site_member_removed.html",
+      membership: membership
+    )
   end
 
   defp base_email() do

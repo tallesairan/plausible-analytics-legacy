@@ -3,7 +3,7 @@ defmodule Plausible.Workers.SendCheckStatsEmails do
   use Oban.Worker, queue: :check_stats_emails
 
   @impl Oban.Worker
-  def perform(_args, _job) do
+  def perform(_job) do
     q =
       from(u in Plausible.Auth.User,
         left_join: ce in "check_stats_emails",
@@ -19,7 +19,7 @@ defmodule Plausible.Workers.SendCheckStatsEmails do
     for user <- Repo.all(q) do
       enabled_report = Enum.any?(user.sites, fn site -> site.weekly_report end)
 
-      if Plausible.Auth.user_completed_setup?(user) && !enabled_report do
+      if Plausible.Auth.has_active_sites?(user) && !enabled_report do
         send_check_stats_email(user)
       end
     end

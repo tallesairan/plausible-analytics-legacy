@@ -32,6 +32,12 @@ defmodule PlausibleWeb.StatsControllerTest do
       assert html_response(conn, 200) =~ "stats-react-container"
     end
 
+    test "shows locked page if page is locked", %{conn: conn, user: user} do
+      locked_site = insert(:site, locked: true, members: [user])
+      conn = get(conn, "/" <> locked_site.domain)
+      assert html_response(conn, 200) =~ "Site locked"
+    end
+
     test "can not view stats of someone else's website", %{conn: conn} do
       conn = get(conn, "/some-other-site.com")
       assert html_response(conn, 404) =~ "There&#39;s nothing here"
@@ -45,8 +51,8 @@ defmodule PlausibleWeb.StatsControllerTest do
       today = Timex.today() |> Timex.format!("{ISOdate}")
 
       conn = get(conn, "/" <> site.domain <> "/visitors.csv")
-      assert response(conn, 200) =~ "Date,Visitors"
-      assert response(conn, 200) =~ "#{today},3"
+      assert response(conn, 200) =~ "visitors,pageviews,bounce_rate,visit_duration"
+      assert response(conn, 200) =~ "#{today},3,3,0,0"
     end
   end
 
@@ -58,8 +64,8 @@ defmodule PlausibleWeb.StatsControllerTest do
       today = Timex.today() |> Timex.format!("{ISOdate}")
 
       conn = get(conn, "/" <> site.domain <> "/visitors.csv?auth=#{link.slug}")
-      assert response(conn, 200) =~ "Date,Visitors"
-      assert response(conn, 200) =~ "#{today},3"
+      assert response(conn, 200) =~ "visitors,pageviews,bounce_rate,visit_duration"
+      assert response(conn, 200) =~ "#{today},3,3,0,0"
     end
   end
 

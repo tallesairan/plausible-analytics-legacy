@@ -5,9 +5,11 @@ defmodule Plausible.Workers.SendEmailReport do
   alias Plausible.Stats.Clickhouse, as: Stats
 
   @impl Oban.Worker
-  def perform(%{"interval" => "weekly", "site_id" => site_id}, _job) do
+  def perform(%Oban.Job{args: %{"interval" => "weekly", "site_id" => site_id}}) do
     site = Repo.get(Plausible.Site, site_id) |> Repo.preload(:weekly_report)
-    query = Query.from(site.timezone, %{"period" => "7d"})
+    today = Timex.now(site.timezone) |> DateTime.to_date()
+    date = Timex.shift(today, weeks: -1) |> Timex.end_of_week() |> Date.to_iso8601()
+    query = Query.from(site.timezone, %{"period" => "7d", "date" => date})
 
     for email <- site.weekly_report.recipients do
       unsubscribe_link =
@@ -21,7 +23,7 @@ defmodule Plausible.Workers.SendEmailReport do
   end
 
   @impl Oban.Worker
-  def perform(%{"interval" => "monthly", "site_id" => site_id}, _job) do
+  def perform(%Oban.Job{args: %{"interval" => "monthly", "site_id" => site_id}}) do
     site = Repo.get(Plausible.Site, site_id) |> Repo.preload(:monthly_report)
 
     last_month =
@@ -58,7 +60,7 @@ defmodule Plausible.Workers.SendEmailReport do
     referrers = Stats.top_sources(site, query, 5, 1, [])
     pages = Stats.top_pages(site, query, 5, 1, [])
     user = Plausible.Auth.find_user_by(email: email)
-    login_link = user && Plausible.Sites.is_owner?(user.id, site)
+    login_link = user && Plausible.Sites.is_member?(user.id, site)
 
     template =
       PlausibleWeb.Email.weekly_report(email, site,

@@ -1,13 +1,21 @@
 defmodule Plausible.Billing.PlansTest do
   use Plausible.DataCase
-  use Bamboo.Test, shared: true
   alias Plausible.Billing.Plans
 
-  test "suggested plan name" do
-    assert Plans.suggested_plan_name(110_000) == "200k/mo"
-  end
+  @v1_plan_id "558018"
+  @v2_plan_id "654177"
 
-  test "suggested plan cost" do
-    assert Plans.suggested_plan_cost(110_000) == "$18/mo"
+  describe "plans_for" do
+    test "shows v1 pricing for users who are already on v1 pricing" do
+      user = insert(:user, subscription: build(:subscription, paddle_plan_id: @v1_plan_id))
+
+      assert List.first(Plans.plans_for(user))[:monthly_product_id] == @v1_plan_id
+    end
+
+    test "shows v2 pricing for everyone else" do
+      user = insert(:user) |> Repo.preload(:subscription)
+
+      assert List.first(Plans.plans_for(user))[:monthly_product_id] == @v2_plan_id
+    end
   end
 end

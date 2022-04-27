@@ -7,12 +7,11 @@ defmodule PlausibleWeb.Api.ExternalController do
     Sentry.Context.set_extra_context(%{request: params})
 
     case create_event(conn, params) do
-      {:ok, _} ->
-        conn |> send_resp(202, "")
+      :ok ->
+        conn |> put_status(202) |> text("ok")
 
-      {:error, changeset} ->
-        Logger.info("Error processing event: #{inspect(changeset)}")
-        conn |> send_resp(400, "")
+      {:error, errors} ->
+        conn |> put_status(400) |> json(%{errors: errors})
     end
   end
 
@@ -51,11 +50,20 @@ defmodule PlausibleWeb.Api.ExternalController do
     user_agent = Plug.Conn.get_req_header(conn, "user-agent") |> List.first()
 
     if user_agent do
-      Cachex.fetch!(:user_agents, user_agent, fn ua ->
-        {:commit, UAInspector.parse(ua)}
-      end)
+      res =
+        Cachex.fetch(:user_agents, user_agent, fn ua ->
+          UAInspector.parse(ua)
+        end)
+
+      case res do
+        {:ok, user_agent} -> user_agent
+        {:commit, user_agent} -> user_agent
+        _ -> nil
+      end
     end
   end
+
+  @no_domain_error {:error, %{domain: ["can't be blank"]}}
 
   defp create_event(conn, params) do
     params = %{
@@ -70,11 +78,12 @@ defmodule PlausibleWeb.Api.ExternalController do
 
     ua = parse_user_agent(conn)
 
-    if is_bot?(ua) do
-      {:ok, nil}
+    if is_bot?(ua) || params["domain"] in Application.get_env(:plausible, :domain_blacklist) do
+      :ok
     else
       uri = params["url"] && URI.parse(params["url"])
-      query = if uri && uri.query, do: URI.decode_query(uri.query), else: %{}
+      host = if uri && uri.host == "", do: "(none)", else: uri && uri.host
+      query = decode_query_params(uri)
 
       ref = parse_referrer(uri, params["referrer"])
       country_code = visitor_country(conn)
@@ -83,38 +92,57 @@ defmodule PlausibleWeb.Api.ExternalController do
       event_attrs = %{
         timestamp: NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second),
         name: params["name"],
-        hostname: strip_www(uri && uri.host),
-        domain: strip_www(params["domain"]) || strip_www(uri && uri.host),
+        hostname: strip_www(host),
         pathname: get_pathname(uri, params["hash_mode"]),
-        user_id: generate_user_id(conn, params, salts[:current]),
-        referrer_source: get_referrer_source(query, ref) || "",
-        referrer: clean_referrer(ref) || "",
-        utm_medium: query["utm_medium"] || "",
-        utm_source: query["utm_source"] || "",
-        utm_campaign: query["utm_campaign"] || "",
-        country_code: country_code || "",
-        operating_system: (ua && os_name(ua)) || "",
-        operating_system_version: (ua && os_version(ua)) || "",
-        browser: (ua && browser_name(ua)) || "",
-        browser_version: (ua && browser_version(ua)) || "",
-        screen_size: calculate_screen_size(params["screen_width"]) || "",
+        referrer_source: get_referrer_source(query, ref),
+        referrer: clean_referrer(ref),
+        utm_medium: query["utm_medium"],
+        utm_source: query["utm_source"],
+        utm_campaign: query["utm_campaign"],
+        country_code: country_code,
+        operating_system: ua && os_name(ua),
+        operating_system_version: ua && os_version(ua),
+        browser: ua && browser_name(ua),
+        browser_version: ua && browser_version(ua),
+        screen_size: calculate_screen_size(params["screen_width"]),
         "meta.key": Map.keys(params["meta"]),
         "meta.value": Map.values(params["meta"]) |> Enum.map(&Kernel.to_string/1)
       }
 
-      changeset = Plausible.ClickhouseEvent.changeset(%Plausible.ClickhouseEvent{}, event_attrs)
+      Enum.reduce_while(get_domains(params, uri), @no_domain_error, fn domain, _res ->
+        user_id = generate_user_id(conn, domain, event_attrs[:hostname], salts[:current])
 
-      if changeset.valid? do
-        previous_user_id = salts[:previous] && generate_user_id(conn, params, salts[:previous])
-        event = struct(Plausible.ClickhouseEvent, event_attrs)
-        session_id = Plausible.Session.Store.on_event(event, previous_user_id)
+        previous_user_id =
+          salts[:previous] &&
+            generate_user_id(conn, domain, event_attrs[:hostname], salts[:previous])
 
-        Map.put(event, :session_id, session_id)
-        |> Plausible.Event.WriteBuffer.insert()
-      else
-        {:error, changeset}
-      end
+        changeset =
+          event_attrs
+          |> Map.merge(%{domain: domain, user_id: user_id})
+          |> Plausible.ClickhouseEvent.new()
+
+        if changeset.valid? do
+          event = Ecto.Changeset.apply_changes(changeset)
+          session_id = Plausible.Session.Store.on_event(event, previous_user_id)
+
+          event
+          |> Map.put(:session_id, session_id)
+          |> Plausible.Event.WriteBuffer.insert()
+
+          {:cont, :ok}
+        else
+          errors = Ecto.Changeset.traverse_errors(changeset, &encode_error/1)
+          {:halt, {:error, errors}}
+        end
+      end)
     end
+  end
+
+  # https://hexdocs.pm/ecto/Ecto.Changeset.html#traverse_errors/2-examples
+  defp encode_error({msg, opts}) do
+    Regex.replace(~r"%{(\w+)}", msg, fn _, key ->
+      opts |> Keyword.get(String.to_existing_atom(key), key) |> to_string()
+    end)
   end
 
   defp is_bot?(%UAInspector.Result.Bot{}), do: true
@@ -127,13 +155,31 @@ defmodule PlausibleWeb.Api.ExternalController do
   defp parse_meta(params) do
     raw_meta = params["m"] || params["meta"] || params["p"] || params["props"]
 
-    if raw_meta do
-      case Jason.decode(raw_meta) do
-        {:ok, props} when is_map(props) -> props
-        _ -> %{}
-      end
+    with raw_json when not is_nil(raw_meta) <- raw_meta,
+         {:ok, parsed_json} when is_map(parsed_json) <- Jason.decode(raw_json),
+         :ok <- validate_custom_props(parsed_json) do
+      parsed_json
     else
-      %{}
+      _ -> %{}
+    end
+  end
+
+  defp validate_custom_props(props) do
+    is_valid =
+      Enum.all?(props, fn {_key, val} ->
+        !is_list(val)
+      end)
+
+    if is_valid, do: :ok, else: :invalid_props
+  end
+
+  defp get_domains(params, uri) do
+    if params["domain"] do
+      String.split(params["domain"], ",")
+      |> Enum.map(&String.trim/1)
+      |> Enum.map(&strip_www/1)
+    else
+      List.wrap(strip_www(uri && uri.host))
     end
   end
 
@@ -155,11 +201,8 @@ defmodule PlausibleWeb.Api.ExternalController do
     result =
       PlausibleWeb.RemoteIp.get(conn)
       |> Geolix.lookup()
-      |> Map.get(:country)
 
-    if result && result.country do
-      result.country.iso_code
-    end
+    get_in(result, [:country, :country, :iso_code])
   end
 
   defp parse_referrer(_, nil), do: nil
@@ -172,12 +215,23 @@ defmodule PlausibleWeb.Api.ExternalController do
     end
   end
 
-  defp generate_user_id(conn, params, salt) do
+  defp generate_user_id(conn, domain, hostname, salt) do
     user_agent = List.first(Plug.Conn.get_req_header(conn, "user-agent")) || ""
     ip_address = PlausibleWeb.RemoteIp.get(conn)
-    domain = strip_www(params["domain"]) || ""
+    root_domain = get_root_domain(hostname)
 
-    SipHash.hash!(salt, user_agent <> ip_address <> domain)
+    if domain && root_domain do
+      SipHash.hash!(salt, user_agent <> ip_address <> domain <> root_domain)
+    end
+  end
+
+  defp get_root_domain(nil), do: "(none)"
+
+  defp get_root_domain(hostname) do
+    case PublicSuffix.registrable_domain(hostname) do
+      domain when is_binary(domain) -> domain
+      _ -> hostname
+    end
   end
 
   defp calculate_screen_size(nil), do: nil
@@ -199,8 +253,14 @@ defmodule PlausibleWeb.Api.ExternalController do
   end
 
   defp parse_body(conn) do
-    {:ok, body, _conn} = Plug.Conn.read_body(conn)
-    Jason.decode!(body)
+    case conn.body_params do
+      %Plug.Conn.Unfetched{} ->
+        {:ok, body, _conn} = Plug.Conn.read_body(conn)
+        Jason.decode!(body)
+
+      params ->
+        params
+    end
   end
 
   defp strip_www(nil), do: nil
@@ -287,4 +347,15 @@ defmodule PlausibleWeb.Api.ExternalController do
        do: true
 
   defp right_uri?(_), do: false
+
+  defp decode_query_params(nil), do: nil
+  defp decode_query_params(%URI{query: nil}), do: nil
+
+  defp decode_query_params(%URI{query: query_part}) do
+    try do
+      URI.decode_query(query_part)
+    rescue
+      _ -> nil
+    end
+  end
 end

@@ -1,6 +1,7 @@
 import React from 'react'
 import { Link, withRouter } from 'react-router-dom'
 import {formatDay, formatMonthYYYY, nowForSite, parseUTCDate} from './date'
+import * as storage from './storage'
 
 const PERIODS = ['realtime', 'day', 'month', '7d', '30d', '6mo', '12mo', 'custom']
 
@@ -10,9 +11,9 @@ export function parseQuery(querystring, site) {
   const periodKey = `period__${  site.domain}`
 
   if (PERIODS.includes(period)) {
-    if (period !== 'custom' && period !== 'realtime') window.localStorage[periodKey] = period
-  } else if (window.localStorage[periodKey]) {
-      period = window.localStorage[periodKey]
+    if (period !== 'custom' && period !== 'realtime') storage.setItem(periodKey, period)
+  } else if (storage.getItem(periodKey)) {
+      period = storage.getItem(periodKey)
     } else {
       period = '30d'
     }
@@ -43,13 +44,10 @@ export function parseQuery(querystring, site) {
   }
 }
 
-export function countFilters(query) {
-  let count = 0;
-  for (const filter of Object.values(query.filters)) {
-    if (filter) count++;
-  }
-
-  return count;
+export function appliedFilters(query) {
+  return Object.keys(query.filters)
+    .map((key) => [key, query.filters[key]])
+    .filter(([_key, value]) => !!value);
 }
 
 function generateQueryString(data) {
@@ -91,7 +89,7 @@ class QueryLink extends React.Component {
   }
 
   render() {
-    const { history, query, to, ...props } = this.props
+    const { to, ...props } = this.props
     return (
       <Link
         {...props}
@@ -143,12 +141,6 @@ export function toHuman(query) {
   }
 }
 
-export function removeQueryParam(search, parameter) {
-  const q = new URLSearchParams(search)
-  q.delete(parameter)
-  return q.toString()
-}
-
 export function eventName(query) {
   if (query.filters.goal) {
     if (query.filters.goal.startsWith('Visit ')) {
@@ -157,4 +149,23 @@ export function eventName(query) {
     return 'events'
   }
   return 'pageviews'
+}
+
+export const formattedFilters = {
+  'goal': 'Goal',
+  'props': 'Goal properties',
+  'source': 'Source',
+  'utm_medium': 'UTM Medium',
+  'utm_source': 'UTM Source',
+  'utm_campaign': 'UTM Campaign',
+  'referrer': 'Referrer URL',
+  'screen': 'Screen size',
+  'browser': 'Browser',
+  'browser_version': 'Browser Version',
+  'os': 'Operating System',
+  'os_version': 'Operating System Version',
+  'country': 'Country',
+  'page': 'Page',
+  'entry_page': 'Entry Page',
+  'exit_page': 'Exit Page'
 }

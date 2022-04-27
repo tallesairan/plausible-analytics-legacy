@@ -10,7 +10,7 @@ defmodule Plausible.Workers.ScheduleEmailReports do
   of a site. This job runs every day at midnight to ensure that all sites
   have a scheduled job for email reports.
   """
-  def perform(_args, _job) do
+  def perform(_job) do
     schedule_weekly_emails()
     schedule_monthly_emails()
   end
@@ -34,6 +34,7 @@ defmodule Plausible.Workers.ScheduleEmailReports do
             fragment("(? -> 'site_id')::int", job.args) == s.id and
               job.state not in ["completed", "discarded"],
           where: is_nil(job),
+          where: not s.locked,
           preload: [weekly_report: wr]
       )
 
@@ -73,6 +74,7 @@ defmodule Plausible.Workers.ScheduleEmailReports do
             fragment("(? -> 'site_id')::int", job.args) == s.id and
               job.state not in ["completed", "discarded"],
           where: is_nil(job),
+          where: not s.locked,
           preload: [monthly_report: mr]
       )
 

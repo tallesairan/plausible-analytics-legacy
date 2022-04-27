@@ -1,7 +1,48 @@
 # Changelog
 All notable changes to this project will be documented in this file.
 
-## [1.3] - Unreleased
+## Unreleased
+
+### Added
+- New parameter `metrics` for the `/api/v1/stats/timeseries` endpoint plausible/analytics#952
+- CSV export now includes pageviews, bounce rate and visit duration in addition to visitors plausible/analytics#952
+- Send stats to multiple dashboards by configuring a comma-separated list of domains plausible/analytics#968
+- To authenticate against a local postgresql via socket authentication, the environment-variables
+  `DATABASE_SOCKET_DIR` & `DATABASE_NAME` were added.
+- Time on Page metric available in detailed Top Pages report plausible/analytics#1007
+- Wildcard based page, entry page and exit page filters plausible/analytics#1067
+- Exclusion filters for page, entry page and exit page filters plausible/analytics#1067
+- Menu (with auto-complete) to add new and edit existing filters directly plausible/analytics#1089
+- Added `CLICKHOUSE_FLUSH_INTERVAL_MS` and `CLICKHOUSE_MAX_BUFFER_SIZE` configuration parameters plausible/analytics#1073
+- Ability to invite users to sites with different roles plausible/analytics#1122
+- Option to configure a custom name for the script file
+- Add Conversion Rate to Top Sources, Top Pages Devices, Countries when filtered by a goal plausible/analytics#1299
+- Add list view for countries report in dashboard plausible/analytics#1381
+- Add ability to view more than 100 custom goal properties plausible/analytics#1353
+
+### Fixed
+- Fix weekly report time range plausible/analytics#951
+- Make sure embedded dashboards can run when user has blocked third-party cookies plausible/analytics#971
+- Sites listing page will paginate if the user has a lot of sites plausible/analytics#994
+- Crash when changing theme on a loaded dashboard plausible/analytics#1123
+- UI fix for details button overlapping content on mobile plausible/analytics#1114
+- UI fix for the main graph on mobile overlapping its tick items on both axis
+- UI fixes for text not showing properly in bars across multiple lines. This hides the totals on <768px and only shows the uniques and % to accommodate the goals text too. Larger screens still truncate as usual.
+- Turn off autocomplete for name and password inputs in the _New shared link_ form.
+- Details modals are now responsive and take up less horizontal space on smaller screens to make it easier to scroll.
+- Fix reading config from file
+- Fix some links not opening correctly in new tab
+- UI fix for more than one row of custom event properties plausible/analytics#1383
+- UI fix for user menu and time picker overlapping plausible/analytics#1352
+- Respect the `path` component of BASE_URL to allow subfolder installatons
+
+### Removed
+- Removes AppSignal monitoring package
+
+### Changes
+- Disable email verification by default. Added a configuration option `ENABLE_EMAIL_VERIFICATION=true` if you want to keep the old behaviour
+
+## [1.3] - 2021-04-14
 
 ### Added
 - Stats API [currently in beta] plausible/analytics#679

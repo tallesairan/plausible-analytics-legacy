@@ -4,7 +4,6 @@ import { Link, withRouter } from 'react-router-dom'
 import Modal from './modal'
 import * as api from '../../api'
 import numberFormatter from '../../number-formatter'
-import Bar from '../bar'
 import {parseQuery, toHuman} from '../../query'
 import RocketIcon from './rocket-icon'
 
@@ -81,11 +80,11 @@ class GoogleKeywordsModal extends React.Component {
       }
     } else if (this.state.searchTerms.length > 0) {
       return (
-        <table className="w-full table-striped table-fixed">
+        <table className="w-max overflow-x-auto md:w-full table-striped table-fixed">
           <thead>
             <tr>
-              <th className="p-2 text-xs tracking-wide font-bold text-gray-500 dark:text-gray-400" align="left">Search Term</th>
-              <th className="p-2 w-32 text-xs tracking-wide font-bold text-gray-500 dark:text-gray-400" align="right">Visitors</th>
+              <th className="p-2 w-48 md:w-56 lg:w-1/3 text-xs tracking-wide font-bold text-gray-500 dark:text-gray-400" align="left">Search Term</th>
+              <th className="p-2 w-32 lg:w-1/2 text-xs tracking-wide font-bold text-gray-500 dark:text-gray-400" align="right">Visitors</th>
             </tr>
           </thead>
           <tbody>

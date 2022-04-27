@@ -14,14 +14,14 @@ config :plausible, PlausibleWeb.Endpoint,
       "node_modules/webpack/bin/webpack.js",
       "--mode",
       "development",
-      "--watch-stdin",
+      "--watch",
+      "--watch-options-stdin",
       cd: Path.expand("../assets", __DIR__)
     ]
   ],
   live_reload: [
     patterns: [
       ~r{priv/static/.*(js|css|png|jpeg|jpg|gif|svg)$},
-      ~r{priv/gettext/.*(po)$},
       ~r{lib/plausible_web/views/.*(ex)$},
       ~r{lib/plausible_web/templates/.*(eex)$},
       ~r{lib/plausible_web/controllers/.*(ex)$},

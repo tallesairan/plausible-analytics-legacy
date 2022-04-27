@@ -30,6 +30,10 @@ defmodule Plausible.Factory do
     }
   end
 
+  def site_membership_factory do
+    %Plausible.Site.Membership{}
+  end
+
   def ch_session_factory do
     hostname = sequence(:domain, &"example-#{&1}.com")
 
@@ -76,7 +80,7 @@ defmodule Plausible.Factory do
       hostname: hostname,
       domain: hostname,
       pathname: "/",
-      timestamp: Timex.now(),
+      timestamp: NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second),
       user_id: SipHash.hash!(hash_key(), UUID.uuid4()),
       session_id: SipHash.hash!(hash_key(), UUID.uuid4()),
       referrer: "",
@@ -107,7 +111,18 @@ defmodule Plausible.Factory do
       update_url: "cancel.com",
       status: "active",
       next_bill_amount: "6.00",
-      next_bill_date: Timex.today()
+      next_bill_date: Timex.today(),
+      currency_code: "USD"
+    }
+  end
+
+  def enterprise_plan_factory do
+    %Plausible.Billing.EnterprisePlan{
+      paddle_plan_id: sequence(:paddle_plan_id, &"plan-#{&1}"),
+      billing_interval: :monthly,
+      monthly_pageview_limit: 1_000_000,
+      hourly_api_request_limit: 3000,
+      site_limit: 100
     }
   end
 
@@ -149,6 +164,14 @@ defmodule Plausible.Factory do
     %Plausible.Site.SharedLink{
       name: "Link name",
       slug: Nanoid.generate()
+    }
+  end
+
+  def invitation_factory do
+    %Plausible.Auth.Invitation{
+      invitation_id: Nanoid.generate(),
+      email: sequence(:email, &"email-#{&1}@example.com"),
+      role: :admin
     }
   end
 

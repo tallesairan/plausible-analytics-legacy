@@ -17,7 +17,7 @@ defmodule Plausible.Workers.SpikeNotifierTest do
       stub(Plausible.Stats.Clickhouse, :current_visitors, fn _site, _query -> 5 end)
       |> stub(:top_sources, fn _site, _query, _limit, _page, _show_noref -> [] end)
 
-    SpikeNotifier.perform(nil, nil, clickhouse_stub)
+    SpikeNotifier.perform(nil, clickhouse_stub)
 
     assert_no_emails_delivered()
   end
@@ -35,7 +35,7 @@ defmodule Plausible.Workers.SpikeNotifierTest do
       stub(Plausible.Stats.Clickhouse, :current_visitors, fn _site, _query -> 10 end)
       |> stub(:top_sources, fn _site, _query, _limit, _page, _show_noref -> [] end)
 
-    SpikeNotifier.perform(nil, nil, clickhouse_stub)
+    SpikeNotifier.perform(nil, clickhouse_stub)
 
     assert_email_delivered_with(
       subject: "Traffic spike on #{site.domain}",
@@ -48,6 +48,24 @@ defmodule Plausible.Workers.SpikeNotifierTest do
     )
   end
 
+  test "does not check site if it is locked" do
+    site = insert(:site, locked: true)
+
+    insert(:spike_notification,
+      site: site,
+      threshold: 10,
+      recipients: ["uku@example.com"]
+    )
+
+    clickhouse_stub =
+      stub(Plausible.Stats.Clickhouse, :current_visitors, fn _site, _query -> 10 end)
+      |> stub(:top_sources, fn _site, _query, _limit, _page, _show_noref -> [] end)
+
+    SpikeNotifier.perform(nil, clickhouse_stub)
+
+    assert_no_emails_delivered()
+  end
+
   test "does not notify anyone if a notification already went out in the last 12 hours" do
     site = insert(:site)
     insert(:spike_notification, site: site, threshold: 10, recipients: ["uku@example.com"])
@@ -56,14 +74,14 @@ defmodule Plausible.Workers.SpikeNotifierTest do
       stub(Plausible.Stats.Clickhouse, :current_visitors, fn _site, _query -> 10 end)
       |> stub(:top_sources, fn _site, _query, _limit, _page, _show_noref -> [] end)
 
-    SpikeNotifier.perform(nil, nil, clickhouse_stub)
+    SpikeNotifier.perform(nil, clickhouse_stub)
 
     assert_email_delivered_with(
       subject: "Traffic spike on #{site.domain}",
       to: [nil: "uku@example.com"]
     )
 
-    SpikeNotifier.perform(nil, nil, clickhouse_stub)
+    SpikeNotifier.perform(nil, clickhouse_stub)
 
     assert_no_emails_delivered()
   end
