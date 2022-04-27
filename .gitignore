@@ -49,12 +49,7 @@ npm-debug.log
 # Ignore Elixir Language Server files
 .elixir_ls
 plausible-report.xml
-
-*.sh
-.idea
-*.iml
-*.log
-*.code-workspace
+ 
 
 # Dializer
 /priv/plts/*.plt
